@@ -1,0 +1,432 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum GymStatus {
+  setup_in_progress
+  pending
+  active
+
+  @@map("gym_status")
+}
+
+enum SubscriptionStatus {
+  trialing
+  pending_payment
+  active
+  failed
+
+  @@map("subscription_status")
+}
+
+model UserAccount {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @db.Text
+  emailKey     String        @unique @map("email_key") @db.Text
+  passwordHash String        @map("password_hash") @db.Text
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  roleId       String        @map("role_id") @db.Uuid
+  role         Role          @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  ownerProfile OwnerProfile?
+  gym          Gym?
+  staffMember  StaffMember?
+  auditLogs    AuditLog[]
+  settlements  Settlement[]
+
+  @@map("user_accounts")
+}
+
+model Role {
+  id          String           @id @default(uuid()) @db.Uuid
+  name        String           @unique @db.Text
+  users       UserAccount[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id    String           @id @default(uuid()) @db.Uuid
+  name  String           @unique @db.Text
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  enabled      Boolean
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model OwnerProfile {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @unique @map("user_id") @db.Uuid
+  displayName String      @map("display_name") @db.Text
+  contact     String      @db.Text
+  user        UserAccount @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("owner_profiles")
+}
+
+model Gym {
+  id            String         @id @default(uuid()) @db.Uuid
+  ownerId       String         @unique @map("owner_id") @db.Uuid
+  status        GymStatus      @default(setup_in_progress)
+  gymName       String?        @map("gym_name") @db.Text
+  address       String?        @db.Text
+  contact       String?        @db.Text
+  timing        String?        @db.Text
+  logoValue     String?        @map("logo_value") @db.Text
+  contactEmail  String?        @map("contact_email") @db.Text
+  description   String?        @db.Text
+  mapsUrl       String?        @map("maps_url") @db.Text
+  submittedAt   DateTime?      @map("submitted_at") @db.Timestamptz(3)
+  activatedAt   DateTime?      @map("activated_at") @db.Timestamptz(3)
+  owner         UserAccount    @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  subscriptions Subscription[]
+  members       Member[]
+  membershipProducts MembershipProduct[]
+  memberships   Membership[]
+  membershipPayments MembershipPayment[]
+  staffMembers  StaffMember[]
+  auditLogs     AuditLog[]
+  platformCharges PlatformCharge[]
+  expenses      Expense[]
+  automations   GymAutomation[]
+  messages      Message[]
+
+  @@map("gyms")
+}
+
+model Plan {
+  id                String         @id @default(uuid()) @db.Uuid
+  code              String         @unique @db.Text
+  name              String         @db.Text
+  priceMonthlyPaise Int            @map("price_monthly_paise")
+  trialDays         Int            @map("trial_days")
+  featureFlags      String[]       @default([]) @map("feature_flags")
+  maxMembers        Int?           @map("max_members")
+  maxStaff          Int?           @map("max_staff")
+  maxBranches       Int?           @map("max_branches")
+  isActive          Boolean        @default(true) @map("is_active")
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  subscriptions     Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                 String             @id @default(uuid()) @db.Uuid
+  gymId              String             @map("gym_id") @db.Uuid
+  planId             String             @map("plan_id") @db.Uuid
+  status             SubscriptionStatus
+  planName           String?            @map("plan_name") @db.Text
+  priceMonthlyPaise  Int?               @map("price_monthly_paise")
+  featureFlags       String[]           @default([]) @map("feature_flags")
+  maxMembers         Int?               @map("max_members")
+  maxStaff           Int?               @map("max_staff")
+  maxBranches        Int?               @map("max_branches")
+  currentPeriodStart DateTime?          @map("current_period_start") @db.Timestamptz(3)
+  currentPeriodEnd   DateTime?          @map("current_period_end") @db.Timestamptz(3)
+  startedAt          DateTime?          @map("started_at") @db.Timestamptz(3)
+  expiredAt          DateTime?          @map("expired_at") @db.Timestamptz(3)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  gym                Gym                @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  plan               Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+  platformCharges    PlatformCharge[]
+
+  @@unique([gymId], map: "subscriptions_one_pending_per_gym", where: { status: "pending_payment" })
+  @@unique([gymId], map: "subscriptions_one_trial_per_gym", where: { status: "trialing" })
+  @@index([gymId])
+  @@map("subscriptions")
+}
+
+enum MembershipState {
+  active
+  frozen
+
+  @@map("membership_state")
+}
+
+model Member {
+  id         String       @id @default(uuid()) @db.Uuid
+  gymId      String       @map("gym_id") @db.Uuid
+  fullName   String       @map("full_name") @db.Text
+  contact    String       @db.Text
+  notes      String?      @db.Text
+  leftAt     DateTime?    @map("left_at") @db.Timestamptz(3)
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  gym        Gym          @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  membership Membership?
+  payments   MembershipPayment[]
+  messages   Message[]
+
+  @@index([gymId])
+  @@map("members")
+}
+
+model MembershipProduct {
+  id           String       @id @default(uuid()) @db.Uuid
+  gymId        String       @map("gym_id") @db.Uuid
+  name         String       @db.Text
+  pricePaise   Int          @map("price_paise")
+  durationDays Int          @map("duration_days")
+  isActive     Boolean      @default(true) @map("is_active")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  gym          Gym          @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  memberships  Membership[]
+  payments     MembershipPayment[]
+
+  @@index([gymId])
+  @@map("membership_products")
+}
+
+model Membership {
+  id                 String            @id @default(uuid()) @db.Uuid
+  memberId           String            @unique @map("member_id") @db.Uuid
+  productId          String            @map("product_id") @db.Uuid
+  gymId              String            @map("gym_id") @db.Uuid
+  status             MembershipState   @default(active)
+  productName        String            @map("product_name") @db.Text
+  pricePaise         Int               @map("price_paise")
+  durationDays       Int               @map("duration_days")
+  currentPeriodStart DateTime          @map("current_period_start") @db.Timestamptz(3)
+  currentPeriodEnd   DateTime          @map("current_period_end") @db.Timestamptz(3)
+  frozenAt           DateTime?         @map("frozen_at") @db.Timestamptz(3)
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  gym                Gym               @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  member             Member            @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  product            MembershipProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+  payments           MembershipPayment[]
+
+  @@index([gymId])
+  @@map("memberships")
+}
+
+enum PaymentMethod {
+  cash
+  upi
+  card
+
+  @@map("payment_method")
+}
+
+enum MembershipAction {
+  assign
+  renew
+  switch
+
+  @@map("membership_action")
+}
+
+model MembershipPayment {
+  id                  String            @id @default(uuid()) @db.Uuid
+  membershipId        String            @map("membership_id") @db.Uuid
+  memberId            String            @map("member_id") @db.Uuid
+  gymId               String            @map("gym_id") @db.Uuid
+  productId           String            @map("product_id") @db.Uuid
+  action              MembershipAction
+  listPricePaise      Int               @map("list_price_paise")
+  amountReceivedPaise Int               @map("amount_received_paise")
+  paidOn              DateTime          @map("paid_on") @db.Date
+  method              PaymentMethod
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  membership          Membership        @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  member              Member            @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  gym                 Gym               @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  product             MembershipProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([membershipId])
+  @@index([gymId])
+  @@map("membership_payments")
+}
+
+enum StaffTitle {
+  trainer
+  reception
+  accountant
+
+  @@map("staff_title")
+}
+
+model RoleTemplate {
+  id        String        @id @default(uuid()) @db.Uuid
+  name      String        @unique @db.Text
+  sortOrder Int           @map("sort_order")
+  canView   Boolean       @map("can_view")
+  canCreate Boolean       @map("can_create")
+  canManage Boolean       @map("can_manage")
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  staff     StaffMember[]
+
+  @@map("role_templates")
+}
+
+model StaffMember {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     String       @unique @map("user_id") @db.Uuid
+  gymId      String       @map("gym_id") @db.Uuid
+  fullName   String       @map("full_name") @db.Text
+  title      StaffTitle
+  templateId String       @map("template_id") @db.Uuid
+  canView    Boolean      @map("can_view")
+  canCreate  Boolean      @map("can_create")
+  canManage  Boolean      @map("can_manage")
+  disabledAt DateTime?    @map("disabled_at") @db.Timestamptz(3)
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  user       UserAccount  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  gym        Gym          @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  template   RoleTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@index([gymId])
+  @@map("staff_members")
+}
+
+model AuditLog {
+  id          String      @id @default(uuid()) @db.Uuid
+  gymId       String?     @map("gym_id") @db.Uuid
+  actorUserId String      @map("actor_user_id") @db.Uuid
+  action      String      @db.Text
+  targetType  String      @map("target_type") @db.Text
+  targetId    String      @map("target_id") @db.Uuid
+  detail      Json        @db.JsonB
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  actor       UserAccount @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  gym         Gym?        @relation(fields: [gymId], references: [id], onDelete: Restrict)
+
+  @@index([gymId, createdAt])
+  @@map("audit_logs")
+}
+
+enum PlatformChargeStatus {
+  paid
+  failed
+  refunded
+
+  @@map("platform_charge_status")
+}
+
+model PlatformCharge {
+  id                String               @id @default(uuid()) @db.Uuid
+  gymId             String               @map("gym_id") @db.Uuid
+  subscriptionId    String               @map("subscription_id") @db.Uuid
+  amountPaise       Int                  @map("amount_paise")
+  commissionPercent Int                  @map("commission_percent")
+  commissionPaise   Int                  @map("commission_paise")
+  status            PlatformChargeStatus
+  recordedAt        DateTime             @map("recorded_at") @db.Timestamptz(3)
+  refundedAt        DateTime?            @map("refunded_at") @db.Timestamptz(3)
+  gym               Gym                  @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  subscription      Subscription         @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([gymId, recordedAt])
+  @@index([status, recordedAt])
+  @@map("platform_charges")
+}
+
+model Expense {
+  id          String   @id @default(uuid()) @db.Uuid
+  gymId       String   @map("gym_id") @db.Uuid
+  category    String   @db.Text
+  amountPaise Int      @map("amount_paise")
+  paidOn      DateTime @map("paid_on") @db.Date
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  gym         Gym      @relation(fields: [gymId], references: [id], onDelete: Restrict)
+
+  @@index([gymId, paidOn])
+  @@map("expenses")
+}
+
+model Settlement {
+  id          String      @id @default(uuid()) @db.Uuid
+  month       String      @unique @db.Text
+  amountPaise Int         @map("amount_paise")
+  settledAt   DateTime    @default(now()) @map("settled_at") @db.Timestamptz(3)
+  actorUserId String      @map("actor_user_id") @db.Uuid
+  actor       UserAccount @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@map("settlements")
+}
+
+enum MessageChannel {
+  whatsapp
+  sms
+  push
+
+  @@map("message_channel")
+}
+
+enum MessageTrigger {
+  manual
+  expiry
+  payment
+  inactive
+
+  @@map("message_trigger")
+}
+
+enum MessageStatus {
+  sent
+  failed
+
+  @@map("message_status")
+}
+
+model MessageTemplate {
+  id          String          @id @default(uuid()) @db.Uuid
+  channel     MessageChannel
+  name        String          @db.Text
+  body        String          @db.Text
+  isActive    Boolean         @default(true) @map("is_active")
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  messages    Message[]
+  automations GymAutomation[]
+
+  @@unique([channel, name])
+  @@map("message_templates")
+}
+
+model GymAutomation {
+  id         String          @id @default(uuid()) @db.Uuid
+  gymId      String          @map("gym_id") @db.Uuid
+  trigger    MessageTrigger
+  templateId String          @map("template_id") @db.Uuid
+  enabled    Boolean         @default(false)
+  gym        Gym             @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  template   MessageTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@unique([gymId, trigger])
+  @@map("gym_automations")
+}
+
+model Message {
+  id            String          @id @default(uuid()) @db.Uuid
+  gymId         String          @map("gym_id") @db.Uuid
+  memberId      String          @map("member_id") @db.Uuid
+  templateId    String          @map("template_id") @db.Uuid
+  channel       MessageChannel
+  trigger       MessageTrigger
+  status        MessageStatus
+  failureReason String?         @map("failure_reason") @db.Text
+  body          String          @db.Text
+  sentOn        DateTime        @map("sent_on") @db.Date
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  gym           Gym             @relation(fields: [gymId], references: [id], onDelete: Restrict)
+  member        Member          @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  template      MessageTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@index([gymId, createdAt])
+  @@map("messages")
+}
