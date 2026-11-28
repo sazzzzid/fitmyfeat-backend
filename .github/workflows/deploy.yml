@@ -1,0 +1,14 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Publish this branch
+        run: bash /home/ssm-user/fitmyfeat-backend/scripts/deploy-branch.sh "${GITHUB_REF_NAME}"
